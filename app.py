@@ -1,6 +1,3 @@
-# app.py
-# (This is your full script, updated with CORS)
-
 import asyncio
 import atexit
 import logging
