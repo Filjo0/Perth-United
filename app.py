@@ -1,7 +1,5 @@
 # app.py
-#
-# This is the main server for your app. It is a Flask API,
-# a Telegram Bot, and a Scraper Scheduler all in one.
+# (This is your full script, updated with CORS)
 
 import asyncio
 import atexit
@@ -9,13 +7,13 @@ import logging
 import sqlite3
 import threading
 
-import pandas as pd  # We need pandas for the timestamp
+import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, jsonify, request, send_from_directory
+from flask_cors import CORS  # <-- 1. IMPORT THIS
 from telegram import Update, WebAppInfo
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-# Import the main function from your scraper script
 try:
     from scraper import get_division_data
 except ImportError:
@@ -23,14 +21,11 @@ except ImportError:
     exit(1)
 
 # --- Configuration ---
-# ⬇️ PASTE YOUR TOKEN HERE ⬇️
 TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN_HERE"
-# ⬇️ WE WILL FILL THIS IN AFTER DEPLOYING THE FRONTEND ⬇️
-MINI_APP_URL = "https://your-frontend-app-url.com"
+MINI_APP_URL = "https://your-frontend-app-url.com"  # We get this URL in the final step
 SCRAPE_INTERVAL_MINUTES = 15
 DB_FILE = "futsal_data.db"
 
-# In-memory cache for fast API responses
 LIVE_CACHE = {
     'players': [],
     'fixtures': [],
@@ -39,7 +34,6 @@ LIVE_CACHE = {
     'last_updated': None
 }
 
-# Setup logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -57,7 +51,6 @@ def init_db():
             chat_id INTEGER PRIMARY KEY
         )
         ''')
-        # Stores last known fixtures to check for changes
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS fixtures (
             id TEXT PRIMARY KEY,
@@ -90,10 +83,6 @@ async def send_telegram_message(bot, chat_id, message_text):
 
 # --- Background Scraper & Notifier Job ---
 def scheduled_scraper_job(bot_instance):
-    """
-    This is the core job. It runs the scraper, compares data,
-    and sends notifications to all subscribed users.
-    """
     logger.info("--- [SCHEDULER]: Running scheduled scraper job... ---")
 
     try:
@@ -102,7 +91,7 @@ def scheduled_scraper_job(bot_instance):
         mslb_data = asyncio.run(get_division_data('MSLB'))
 
         if not msl_data or not mslb_data:
-            logger.warning("[SCHEDULER]: Scraping failed for one or more divisions. Skipping update.")
+            logger.warning("[SCHEDULER]: Scraping failed. Skipping update.")
             return
 
         # 2. Combine and update the live cache for API commands
@@ -163,13 +152,16 @@ def scheduled_scraper_job(bot_instance):
 
 
 # --- Flask API Server (Serves data to the React App) ---
-app = Flask(__name__)
+app = Flask(__name__, static_folder='public', static_url_path='')
+CORS(app, resources={r"/api/*": {"origins": "*"}})  # <-- 2. ADD THIS LINE
 
 
-# This will be used later if you bundle your React app
-# @app.route("/")
-# def serve_mini_app():
-#     return send_from_directory('static', 'index.html')
+# --- API Routes ---
+@app.route('/')
+def serve_mini_app():
+    """Serves the main index.html file for the Telegram Mini App."""
+    return send_from_directory('public', 'index.html')
+
 
 @app.route('/api/stats')
 def get_all_stats():

@@ -86,14 +86,28 @@
                 queryFn: fetchAllStats
             });
 
+            // State for sorting
+            const [sortBy, setSortBy] = useState('goals'); // 'goals', 'assists', 'appearances'
+
             if (isLoading) return <div className="loading">Loading Players...</div>;
             if (error) return <div className="loading">Error loading stats.</div>;
 
             const players = data?.players || [];
-            const sortedPlayers = [...players].sort((a, b) => b.goals - a.goals);
+
+            const sortedPlayers = useMemo(() => {
+                return [...players].sort((a, b) => {
+                    // Always sort descending (high to low)
+                    return b.get(sortBy, 0) - a.get(sortBy, 0);
+                });
+            }, [players, sortBy]);
 
             return (
                 <div>
+                    <div className="nav">
+                        <button className={sortBy === 'goals' ? 'active' : ''} onClick={() => setSortBy('goals')}>Goals</button>
+                        <button className={sortBy === 'assists' ? 'active' : ''} onClick={() => setSortBy('assists')}>Assists</button>
+                        <button className={sortBy === 'appearances' ? 'active' : ''} onClick={() => setSortBy('appearances')}>Apps</button>
+                    </div>
                     {sortedPlayers.map((player, i) => (
                         <div key={i} className="card">
                             <h3>[{player.division}] {player.player_name}</h3>
@@ -123,7 +137,6 @@
             const upcoming = useMemo(() => {
                 return fixtures.filter(f => {
                     const score_str = String(f.score || '').trim().toLowerCase();
-                    // An upcoming game has a blank score, 'nan', 'postponed', or contains a time (like '21:30')
                     const isPlayed = score_str.match(/\d+\s*-\s*\d+/); // Matches "3 - 1"
                     return !isPlayed;
                 });
@@ -151,12 +164,12 @@
                 tg.ready();
 
                 // Set theme colors from Telegram
-                document.documentElement.style.setProperty('--tg-bg', tg.themeParams.bg_color);
-                document.documentElement.style.setProperty('--tg-text', tg.themeParams.text_color);
-                document.documentElement.style.setProperty('--tg-hint', tg.themeParams.hint_color);
-                document.documentElement.style.setProperty('--tg-button', tg.themeParams.button_color);
-                document.documentElement.style.setProperty('--tg-button-text', tg.themeParams.button_text_color);
-                document.documentElement.style.setProperty('--tg-secondary-bg', tg.themeParams.secondary_bg_color);
+                document.documentElement.style.setProperty('--tg-bg', tg.themeParams.bg_color || '#ffffff');
+                document.documentElement.style.setProperty('--tg-text', tg.themeParams.text_color || '#000000');
+                document.documentElement.style.setProperty('--tg-hint', tg.themeParams.hint_color || '#999999');
+                document.documentElement.style.setProperty('--tg-button', tg.themeParams.button_color || '#2481cc');
+                document.documentElement.style.setProperty('--tg-button-text', tg.themeParams.button_text_color || '#ffffff');
+                document.documentElement.style.setProperty('--tg-secondary-bg', tg.themeParams.secondary_bg_color || '#f4f4f4');
 
                 // Tell Telegram the app is ready to be shown
                 tg.expand();
