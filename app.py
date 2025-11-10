@@ -1,3 +1,8 @@
+# app.py
+#
+# This is the main server for your app. It is a Flask API,
+# a Telegram Bot, and a Scraper Scheduler all in one.
+
 import asyncio
 import atexit
 import logging
@@ -7,10 +12,11 @@ import threading
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, jsonify, request, send_from_directory
-from flask_cors import CORS  # <-- 1. IMPORT THIS
+from flask_cors import CORS
 from telegram import Update, WebAppInfo
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
+# Import the main function from your scraper script
 try:
     from scraper import get_division_data
 except ImportError:
@@ -23,6 +29,7 @@ MINI_APP_URL = "https://your-frontend-app-url.com"  # We get this URL in the fin
 SCRAPE_INTERVAL_MINUTES = 15
 DB_FILE = "futsal_data.db"
 
+# In-memory cache for fast API responses
 LIVE_CACHE = {
     'players': [],
     'fixtures': [],
@@ -31,6 +38,7 @@ LIVE_CACHE = {
     'last_updated': None
 }
 
+# Setup logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -150,7 +158,7 @@ def scheduled_scraper_job(bot_instance):
 
 # --- Flask API Server (Serves data to the React App) ---
 app = Flask(__name__, static_folder='public', static_url_path='')
-CORS(app, resources={r"/api/*": {"origins": "*"}})  # <-- 2. ADD THIS LINE
+CORS(app, resources={r"/api/*": {"origins": "*"}})  # Allow web app to call API
 
 
 # --- API Routes ---
@@ -259,10 +267,8 @@ def start_bot_and_scheduler():
 if __name__ == '__main__':
     init_db()  # Create database tables if they don't exist
 
-    # Run the Bot in a separate thread
-    bot_thread = threading.Thread(target=asyncio.run, args=(main_bot(),), daemon=True)
+    bot_thread = threading.Thread(target=asyncio.run, args=(start_bot_and_scheduler(),), daemon=True)
     bot_thread.start()
 
     print("Starting Flask API server on http://localhost:5000...")
-    # Run Flask in the main thread
-    app.run(port=5000, host='127.0.0.1', debug=False)
+    app.run(port=5000, host='0.0.0.0', debug=False)
