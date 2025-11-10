@@ -1,4 +1,4 @@
-# api.py
+# app.py
 #
 # This is the main server for your app. It is a Flask API,
 # a Telegram Bot, and a Scraper Scheduler all in one.
@@ -8,12 +8,12 @@ import atexit
 import logging
 import sqlite3
 import threading
-import re  # Import regex for the fixture check
+
 import pandas as pd  # We need pandas for the timestamp
+from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, jsonify, request, send_from_directory
 from telegram import Update, WebAppInfo
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
-from apscheduler.schedulers.background import BackgroundScheduler
 
 # Import the main function from your scraper script
 try:
@@ -274,6 +274,6 @@ if __name__ == '__main__':
     bot_thread = threading.Thread(target=asyncio.run, args=(main_bot(),), daemon=True)
     bot_thread.start()
 
-    # Run the Flask API server in the main thread
     print("Starting Flask API server on http://localhost:5000...")
-    app.run(port=5000, host='0.0.0.0', debug=False)
+    # Run Flask in the main thread
+    app.run(port=5000, host='127.0.0.1', debug=False)
