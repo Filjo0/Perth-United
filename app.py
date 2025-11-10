@@ -25,7 +25,7 @@ except ImportError:
 
 # --- Configuration ---
 TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN_HERE"
-MINI_APP_URL = "https://your-frontend-app-url.com"  # We get this URL in the final step
+MINI_APP_URL = "https://perth-united.onrender.com"
 SCRAPE_INTERVAL_MINUTES = 15
 DB_FILE = "futsal_data.db"
 
