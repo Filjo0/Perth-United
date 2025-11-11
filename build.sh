@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# build.sh (Updated for Render)
+# build.sh
 
 # 1. Install all the Python libraries
 pip install -r requirements.txt
 
-# 2. Install Playwright browsers AND their OS dependencies
-#    This is the critical fix for Render's environment
-playwright install chromium --with-deps
+# 2. Install Playwright browsers (WITHOUT system dependencies)
+playwright install chromium
