@@ -1,211 +1,149 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no, user-scalable=no" />
-    <title>Perth United Stats</title>
+<script type="text/babel">
+    // --- CRITICAL: Wait for React Query to load ---
+    if (!window.ReactQuery) {
+        console.error("React Query failed to load from CDN");
+        throw new Error("React Query not loaded");
+    }
 
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    // --- Setup ---
+    const { useState, useEffect, useMemo } = React;
+    const { QueryClient, QueryClientProvider, useQuery } = window.ReactQuery;
 
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    const queryClient = new QueryClient();
+    const API_BASE_URL = "";
 
-    <script src="https://unpkg.com/@tanstack/react-query@5/dist/umd/react-query.development.js"></script>
+    // --- API Fetching Functions ---
+    const fetchAllStats = async () => {
+        const res = await fetch(`${API_BASE_URL}/api/stats`);
+        if (!res.ok) throw new Error('Network response was not ok');
+        return res.json();
+    };
 
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    // --- REST OF YOUR CODE (UNCHANGED) ---
+    function PlayerStats() {
+        const { data, isLoading, error } = useQuery({
+            queryKey: ['stats'],
+            queryFn: fetchAllStats
+        });
 
-    <style>
-        :root {
-            --tg-bg: #ffffff;
-            --tg-text: #000000;
-            --tg-hint: #999999;
-            --tg-button: #2481cc;
-            --tg-button-text: #ffffff;
-            --tg-secondary-bg: #f4f4f4;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: var(--tg-bg);
-            color: var(--tg-text);
-            margin: 0;
-            padding: 15px;
-            box-sizing: border-box;
-        }
-        .container { max-width: 600px; margin: 0 auto; }
-        .card {
-            background: var(--tg-secondary-bg);
-            border-radius: 12px;
-            padding: 12px 16px;
-            margin-bottom: 12px;
-        }
-        .card h3 { margin: 0 0 8px 0; font-size: 1.1em; }
-        .card p { margin: 0; font-size: 0.9em; color: var(--tg-hint); }
-        .card .stats { color: var(--tg-text); font-weight: 500; }
+        const [sortBy, setSortBy] = useState('goals');
 
-        .loading { text-align: center; padding: 40px; color: var(--tg-hint); font-weight: 500; }
-        .error { text-align: center; padding: 40px; color: #E53E3E; font-weight: 500; }
+        if (isLoading) return <div className="loading">Loading Players...</div>;
+        if (error) return <div className="error">Error loading stats: {error.message}</div>;
 
-        .nav { display: flex; gap: 8px; margin-bottom: 16px; }
-        .nav button {
-            flex: 1; padding: 12px; border: none;
-            background: var(--tg-secondary-bg);
-            color: var(--tg-text);
-            border-radius: 8px; font-weight: bold; font-size: 1em;
-        }
-        .nav button.active {
-            background: var(--tg-button);
-            color: var(--tg-button-text);
-        }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
+        const players = data?.players || [];
 
-    <script type="text/babel">
-        // --- Setup ---
-        const { useState, useEffect, useMemo } = React;
-
-        // --- THIS IS THE FIX ---
-        const { QueryClient, QueryClientProvider, useQuery } = window.TanStackQuery;
-        // --- END OF FIX ---
-
-        const queryClient = new QueryClient();
-
-        // This is the URL where your Python API is hosted
-        const API_BASE_URL = ""; // Empty string to use the same domain
-
-        // --- API Fetching Functions ---
-        const fetchAllStats = async () => {
-            const res = await fetch(`${API_BASE_URL}/api/stats`);
-            if (!res.ok) throw new Error('Network response was not ok');
-            return res.json();
-        };
-
-        // --- React Components ---
-        function PlayerStats() {
-            const { data, isLoading, error } = useQuery({
-                queryKey: ['stats'],
-                queryFn: fetchAllStats
+        const sortedPlayers = useMemo(() => {
+            return [...players].sort((a, b) => {
+                return (b[sortBy] || 0) - (a[sortBy] || 0);
             });
+        }, [players, sortBy]);
 
-            // State for sorting
-            const [sortBy, setSortBy] = useState('goals'); // 'goals', 'assists', 'appearances'
-
-            if (isLoading) return <div className="loading">Loading Players...</div>;
-            if (error) return <div className="loading">Error loading stats.</div>;
-
-            const players = data?.players || [];
-
-            const sortedPlayers = useMemo(() => {
-                // Use .get() for safety, defaulting to 0
-                return [...players].sort((a, b) => {
-                    return b[sortBy] - a[sortBy];
-                });
-            }, [players, sortBy]);
-
-            return (
-                <div>
-                    <div className="nav">
-                        <button className={sortBy === 'goals' ? 'active' : ''} onClick={() => setSortBy('goals')}>Goals</button>
-                        <button className={sortBy === 'assists' ? 'active' : ''} onClick={() => setSortBy('assists')}>Assists</button>
-                        <button className={sortBy === 'appearances' ? 'active' : ''} onClick={() => setSortBy('appearances')}>Apps</button>
+        return (
+            <div>
+                <div className="nav">
+                    <button className={sortBy === 'goals' ? 'active' : ''} onClick={() => setSortBy('goals')}>Goals</button>
+                    <button className={sortBy === 'assists' ? 'active' : ''} onClick={() => setSortBy('assists')}>Assists</button>
+                    <button className={sortBy === 'appearances' ? 'active' : ''} onClick={() => setSortBy('appearances')}>Apps</button>
+                </div>
+                {sortedPlayers.length === 0 && <div className="card"><p>No player stats found.</p></div>}
+                {sortedPlayers.map((player, i) => (
+                    <div key={player.player_name + player.division} className="card">
+                        <h3>[{player.division}] {player.player_name}</h3>
+                        <p className="stats">
+                            <strong>Goals:</strong> {player.goals} |
+                            <strong> Assists:</strong> {player.assists} |
+                            <strong> Apps:</strong> {player.appearances}
+                        </p>
                     </div>
-                    {sortedPlayers.map((player, i) => (
-                        <div key={i} className="card">
-                            <h3>[{player.division}] {player.player_name}</h3>
-                            <p className="stats">
-                                <strong>Goals:</strong> {player.goals} |
-                                <strong> Assists:</strong> {player.assists} |
-                                <strong> Apps:</strong> {player.appearances}
-                            </p>
-                        </div>
-                    ))}
-                </div>
-            );
-        }
-
-        function FixturesCalendar() {
-             const { data, isLoading, error } = useQuery({
-                queryKey: ['stats'], // Use the same 'stats' query
-                queryFn: fetchAllStats
-            });
-
-            if (isLoading) return <div className="loading">Loading Fixtures...</div>;
-            if (error) return <div className="loading">Error loading fixtures.</div>;
-
-            const fixtures = data?.fixtures || [];
-
-            // Filter for upcoming games
-            const upcoming = useMemo(() => {
-                return fixtures.filter(f => {
-                    const score_str = String(f.score || '').trim().toLowerCase();
-                    const isPlayed = score_str.match(/\d+\s*-\s*\d+/); // Matches "3 - 1"
-                    return !isPlayed;
-                });
-            }, [fixtures]);
-
-            return (
-                <div>
-                    {upcoming.map((f, i) => (
-                         <div key={i} className="card">
-                            <h3>[{f.division}] Round {f.round}</h3>
-                            <p><strong>vs {f.opponent}</strong></p>
-                            <p className="stats">{f.date_time} at {f.location || 'TBC'}</p>
-                        </div>
-                    ))}
-                </div>
-            );
-        }
-
-        function App() {
-            const [view, setView] = useState('fixtures'); // Default to fixtures
-
-            useEffect(() => {
-                try {
-                    const tg = window.Telegram.WebApp;
-                    tg.ready();
-
-                    // Set theme colors from Telegram
-                    document.documentElement.style.setProperty('--tg-bg', tg.themeParams.bg_color || '#ffffff');
-                    document.documentElement.style.setProperty('--tg-text', tg.themeParams.text_color || '#000000');
-                    document.documentElement.style.setProperty('--tg-hint', tg.themeParams.hint_color || '#999999');
-                    document.documentElement.style.setProperty('--tg-button', tg.themeParams.button_color || '#2481cc');
-                    document.documentElement.style.setProperty('--tg-button-text', tg.themeParams.button_text_color || '#ffffff');
-                    document.documentElement.style.setProperty('--tg-secondary-bg', tg.themeParams.secondary_bg_color || '#f4f4f4');
-
-                    tg.expand();
-                } catch (e) {
-                    console.warn("Telegram WebApp API not found. Running in browser mode.");
-                }
-            }, []);
-
-            return (
-                <div className="container">
-                    <div className="nav">
-                        <button
-                            className={view === 'fixtures' ? 'active' : ''}
-                            onClick={() => setView('fixtures')}>
-                            Fixtures
-                        </button>
-                        <button
-                            className={view === 'stats' ? 'active' : ''}
-                            onClick={() => setView('stats')}>
-                            Player Stats
-                        </button>
-                    </div>
-
-                    {view === 'fixtures' ? <FixturesCalendar /> : <PlayerStats />}
-                </div>
-            );
-        }
-
-        // --- Mount the App ---
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(
-            <QueryClientProvider client={queryClient}>
-                <App />
-            </QueryClientProvider>
+                ))}
+            </div>
         );
-    </script>
-</body>
-</html>
+    }
+
+    function FixturesCalendar() {
+         const { data, isLoading, error } = useQuery({
+            queryKey: ['stats'],
+            queryFn: fetchAllStats
+        });
+
+        if (isLoading) return <div className="loading">Loading Fixtures...</div>;
+        if (error) return <div className="error">Error loading fixtures: {error.message}</div>;
+
+        const fixtures = data?.fixtures || [];
+
+        const upcoming = useMemo(() => {
+            return fixtures.filter(f => {
+                const score_str = String(f.score || '').trim().toLowerCase();
+                const isPlayed = score_str.match(/\d+\s*-\s*\d+/);
+                return !isPlayed;
+            });
+        }, [fixtures]);
+
+        return (
+            <div>
+                {upcoming.length === 0 && (
+                    <div className="card">
+                        <p>No upcoming fixtures found.</p>
+                    </div>
+                )}
+                {upcoming.map((f, i) => (
+                     <div key={f.id || i} className="card">
+                        <h3>[{f.division}] Round {f.round}</h3>
+                        <p><strong>vs {f.opponent}</strong></p>
+                        <p className="stats">{f.date_time} at {f.location || 'TBC'}</p>
+                    </div>
+                ))}
+            </div>
+        );
+    }
+
+    function App() {
+        const [view, setView] = useState('fixtures');
+
+        useEffect(() => {
+            try {
+                const tg = window.Telegram.WebApp;
+                tg.ready();
+
+                document.documentElement.style.setProperty('--tg-bg', tg.themeParams.bg_color || '#ffffff');
+                document.documentElement.style.setProperty('--tg-text', tg.themeParams.text_color || '#000000');
+                document.documentElement.style.setProperty('--tg-hint', tg.themeParams.hint_color || '#999999');
+                document.documentElement.style.setProperty('--tg-button', tg.themeParams.button_color || '#2481cc');
+                document.documentElement.style.setProperty('--tg-button-text', tg.themeParams.button_text_color || '#ffffff');
+                document.documentElement.style.setProperty('--tg-secondary-bg', tg.themeParams.secondary_bg_color || '#f4f4f4');
+
+                tg.expand();
+            } catch (e) {
+                console.warn("Telegram WebApp API not found. Running in browser mode.");
+            }
+        }, []);
+
+        return (
+            <div className="container">
+                <div className="nav">
+                    <button
+                        className={view === 'fixtures' ? 'active' : ''}
+                        onClick={() => setView('fixtures')}>
+                        Fixtures
+                    </button>
+                    <button
+                        className={view === 'stats' ? 'active' : ''}
+                        onClick={() => setView('stats')}>
+                        Player Stats
+                    </button>
+                </div>
+
+                {view === 'fixtures' ? <FixturesCalendar /> : <PlayerStats />}
+            </div>
+        );
+    }
+
+    // --- Mount the App ---
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(
+        <QueryClientProvider client={queryClient}>
+            <App />
+        </QueryClientProvider>
+    );
+</script>
