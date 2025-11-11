@@ -1,6 +1,6 @@
 flask
 flask-cors
-python-telegram-bot[job-queue]==20.7
+python-telegram-bot[job-queue]
 playwright
 pandas
 uvicorn[standard]
