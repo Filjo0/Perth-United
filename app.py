@@ -1,13 +1,16 @@
 # app.py
 
 import asyncio
+import atexit
 import logging
-import sqlite3
-import re
-import pandas as pd
 import os
-import uvicorn  # For running Flask asynchronously
-from flask import Flask, jsonify, request, send_from_directory
+import re
+import sqlite3
+import threading  # Use the standard threading library
+
+import pandas as pd
+from apscheduler.schedulers.background import BackgroundScheduler
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -37,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 # --- Database Setup (SQLite) ---
 def init_db():
+    # Allow DB to be accessed from multiple threads
     with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
         cursor = conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS subscriptions (chat_id INTEGER PRIMARY KEY)''')
@@ -49,6 +53,7 @@ def init_db():
 
 # --- Push Notification Logic ---
 async def send_telegram_message(bot, chat_id, message_text):
+    """Utility function to send a message to a specific user."""
     try:
         await bot.send_message(chat_id=chat_id, text=message_text)
         logger.info(f"Sent message to {chat_id}")
@@ -62,18 +67,22 @@ async def send_telegram_message(bot, chat_id, message_text):
 
 
 # --- Background Scraper & Notifier Job ---
-async def scheduled_scraper_job(context: ContextTypes.DEFAULT_TYPE):
+def scheduled_scraper_job(application_instance: Application):
     """
-    This is the core job, run by the bot's JobQueue.
+    This is the core job, run by APScheduler in a thread.
     It runs the scraper, compares data, and sends notifications.
     """
     logger.info("--- [SCHEDULER]: Running scheduled scraper job... ---")
 
-    application_instance = context.application
+    bot_instance = application_instance.bot
 
     try:
-        msl_data = await get_division_data('MSL')
-        mslb_data = await get_division_data('MSLB')
+        # We must create a new event loop for asyncio in this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        msl_data = loop.run_until_complete(get_division_data('MSL'))
+        mslb_data = loop.run_until_complete(get_division_data('MSLB'))
 
         if not msl_data or not mslb_data:
             logger.warning("[SCHEDULER]: Scraping failed. Skipping update.")
@@ -100,7 +109,7 @@ async def scheduled_scraper_job(context: ContextTypes.DEFAULT_TYPE):
                 score_str = str(new_fix.get('score', '')).strip().lower()
                 is_played = re.search(r'\d+\s*-\s*\d+', score_str)
                 if is_played:
-                    continue
+                    continue  # Skip played games
 
                 old_date_time = old_fixtures_map.get(new_fix['id'])
 
@@ -126,7 +135,8 @@ async def scheduled_scraper_job(context: ContextTypes.DEFAULT_TYPE):
                 all_subs = cursor.execute("SELECT chat_id FROM subscriptions").fetchall()
                 full_message = "\n\n".join(notifications_to_send)
                 for (chat_id,) in all_subs:
-                    await send_telegram_message(application_instance.bot, chat_id[0], full_message)
+                    loop.run_until_complete(send_telegram_message(bot_instance, chat_id[0], full_message))
+                loop.close()
 
         logger.info("--- [SCHEDULER]: Job finished. ---")
 
@@ -161,13 +171,7 @@ def get_all_stats():
 
 @app.route('/health')
 def health_check():
-    """A simple health check endpoint for Render."""
-    return jsonify({
-        "status": "ok",
-        "last_updated": LIVE_CACHE.get('last_updated'),
-        "players_cached": len(LIVE_CACHE.get('players', [])),
-        "fixtures_cached": len(LIVE_CACHE.get('fixtures', []))
-    })
+    return jsonify({"status": "ok", "last_updated": LIVE_CACHE.get('last_updated')})
 
 
 # --- Telegram Bot Logic ---
@@ -188,57 +192,53 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def main():
-    """Starts the Flask server and the Telegram bot."""
-
+async def start_bot_and_scheduler():
+    """Initializes and starts the Telegram bot and the background scheduler."""
     if not TELEGRAM_BOT_TOKEN:
-        logger.error("!!! ERROR: TELEGRAM_BOT_TOKEN environment variable is not set.")
+        logger.error("!!! ERROR: TELEGRAM_BOT_TOKEN environment variable is not set. Bot thread cannot start.")
         return
     if not MINI_APP_URL or "your-frontend-app-url.com" in MINI_APP_URL:
-        logger.error("!!! ERROR: MINI_APP_URL environment variable is not set.")
+        logger.error("!!! ERROR: MINI_APP_URL environment variable is not set. Bot thread cannot start.")
         return
 
-    # Initialize the DB
-    init_db()
-
-    # Create the Telegram Application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Add the /start command handler
+    scheduler = BackgroundScheduler(daemon=True)
+    scheduler.add_job(
+        scheduled_scraper_job,
+        'interval',
+        minutes=SCRAPE_INTERVAL_MINUTES,
+        args=[application]  # Pass the full application
+    )
+    scheduler.start()
+
+    # Run the first scrape immediately
+    scheduler.add_job(scheduled_scraper_job, 'date', args=[application])
+
+    atexit.register(lambda: scheduler.shutdown())
     application.add_handler(CommandHandler("start", start))
 
-    # --- Schedule the scraper job using the bot's job queue ---
-    job_queue = application.job_queue
-    job_queue.run_once(scheduled_scraper_job, 5)  # Run 5 seconds after startup
-    job_queue.run_repeating(scheduled_scraper_job, interval=SCRAPE_INTERVAL_MINUTES * 60)
-
-    # --- Start the Flask server as an async task ---
-    port = int(os.environ.get('PORT', 10000))
-
-    # Use Uvicorn to run Flask (app) as an async-compatible server
-    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
-    server = uvicorn.Server(config)
-
-    logger.info(f"Starting Flask server on port {port}...")
-
-    # --- THIS IS THE FIX ---
-    # 1. Initialize the bot (this creates the job_queue)
-    await application.initialize()
-
-    # 2. Start the job queue (which runs the scheduler)
-    await application.job_queue.start()
-
-    # 3. Start the Flask/Uvicorn server task
-    server_task = asyncio.create_task(server.serve())
-
-    # 4. Start the bot polling task
-    # We remove 'stop_signals=None' as it's not a valid argument here
-    await application.updater.start_polling(drop_pending_updates=True)
-    # --- END OF FIX ---
-
-    # Wait for both tasks to run
-    await asyncio.gather(server_task)
+    logger.info("Bot is polling...")
+    # This is the fix for the thread crash
+    await application.run_polling(stop_signals=None, drop_pending_updates=True)
 
 
+def run_bot_in_thread():
+    """Sets up a new event loop for the bot in its own thread."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(start_bot_and_scheduler())
+
+
+# --- Main Startup Function ---
 if __name__ == '__main__':
-    asyncio.run(main())
+    init_db()
+
+    # Run the Bot + Scheduler in a separate thread
+    bot_thread = threading.Thread(target=run_bot_in_thread, daemon=True)
+    bot_thread.start()
+
+    # Run the Flask API server in the main thread (this is what Render expects)
+    logger.info("Starting Flask API server...")
+    port = int(os.environ.get('PORT', 10000))
+    app.run(port=port, host='0.0.0.0', debug=False, use_reloader=False)
