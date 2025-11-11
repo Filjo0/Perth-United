@@ -2,6 +2,7 @@ Flask
 flask-cors
 python-telegram-bot[job-queue]
 apscheduler
+asgiref
 pandas
 playwright
 uvicorn
