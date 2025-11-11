@@ -1,6 +1,8 @@
-flask
+Flask
 flask-cors
 python-telegram-bot[job-queue]
-playwright
+apscheduler
 pandas
-uvicorn[standard]
+playwright
+uvicorn
+lxml
