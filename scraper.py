@@ -4,10 +4,11 @@
 # for both the MSL and MSLB divisions for Perth United.
 
 import asyncio
+import logging
+from io import StringIO  # Used to fix a Pandas FutureWarning
+
 import pandas as pd
 from playwright.async_api import async_playwright, Page, FrameLocator
-from io import StringIO
-import logging
 
 # --- Configuration ---
 BASE_URL = 'https://www.futsalsupaliga.com.au'
@@ -105,9 +106,11 @@ async def get_division_data(division: str):
             logger.info(f"Navigating to: {url}")
             await page.goto(url, wait_until='domcontentloaded')
 
+            # --- THIS IS THE CRITICAL 20-SECOND WAIT ---
             logger.info(f"[{division_upper}] Page loaded. Waiting 20 seconds for dynamic content...")
             await page.wait_for_timeout(FORCE_WAIT_MS)
             logger.info(f"[{division_upper}] Wait complete. Starting iframe search.")
+            # --- END OF WAIT ---
 
             tasks = [
                 scrape_table_to_dataframe(page, TABLE_INDICES['ladder']),
