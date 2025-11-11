@@ -1,8 +1,4 @@
 # app.py
-#
-# FINAL VERSION
-# This runs Flask and the Telegram Bot in the same process
-# using the bot's built-in job queue for scheduling.
 
 import asyncio
 import logging
@@ -14,7 +10,7 @@ import pandas as pd
 import uvicorn  # For running Flask asynchronously
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-from telegram import Update
+from telegram import Update, WebAppInfo
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Import the main function from your scraper script
@@ -131,7 +127,7 @@ async def scheduled_scraper_job(context: ContextTypes.DEFAULT_TYPE):
                 all_subs = cursor.execute("SELECT chat_id FROM subscriptions").fetchall()
                 full_message = "\n\n".join(notifications_to_send)
                 for (chat_id,) in all_subs:
-                    # We can safely await because we are in the same async loop
+                    # We are already in an async job, so just await
                     await send_telegram_message(application_instance.bot, chat_id[0], full_message)
 
         logger.info("--- [SCHEDULER]: Job finished. ---")
@@ -215,12 +211,11 @@ async def main():
 
     # --- Schedule the scraper job using the bot's job queue ---
     job_queue = application.job_queue
-    # Run 5 seconds after startup
-    job_queue.run_once(scheduled_scraper_job, 5)
-    # Run every X minutes
+    job_queue.run_once(scheduled_scraper_job, 5)  # Run 5 seconds after startup
     job_queue.run_repeating(scheduled_scraper_job, interval=SCRAPE_INTERVAL_MINUTES * 60)
 
     # --- Start the Flask server as an async task ---
+    # Render's PORT env var is 10000 by default
     port = int(os.environ.get('PORT', 10000))
 
     # Use Uvicorn to run Flask (app) as an async-compatible server
@@ -229,11 +224,28 @@ async def main():
 
     logger.info(f"Starting Flask server on port {port}...")
 
-    # Run the bot and the server concurrently in the same event loop
-    await asyncio.gather(
-        application.run_polling(stop_signals=None, drop_pending_updates=True),
-        server.serve()
-    )
+    # --- THIS IS THE FIX ---
+    # This replaces the entire asyncio.gather block
+    # We initialize the bot, start its job queue, and then run polling
+    # and the server concurrently. This is the official way.
+
+    # 1. Initialize the bot (this creates the job_queue)
+    await application.initialize()
+
+    # 2. Start the job queue (which runs the scheduler)
+    await application.job_queue.start()
+
+    # 3. Start the Flask/Uvicorn server task
+    server_task = asyncio.create_task(server.serve())
+
+    # 4. Start the bot polling task
+    # We use updater.start_polling, which is the non-blocking version
+    # of run_polling.
+    await application.updater.start_polling(stop_signals=None, drop_pending_updates=True)
+
+    # Wait for both tasks to run
+    await asyncio.gather(server_task)
+    # --- END OF FIX ---
 
 
 if __name__ == '__main__':
