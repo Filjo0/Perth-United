@@ -1,10 +1,4 @@
 # app.py
-#
-# FINAL STABLE VERSION (v5)
-# This version fixes all threading and asyncio errors.
-# - Runs Flask (via Uvicorn) and the Telegram Bot in the SAME event loop.
-# - Uses the bot's built-in JobQueue instead of APScheduler.
-# - Fixes 'lxml' and 'job-queue' dependencies.
 
 import asyncio
 import logging
@@ -14,6 +8,7 @@ import sqlite3
 
 import pandas as pd
 import uvicorn  # For running Flask asynchronously
+from asgi_tools.wrappers import WSGIMiddleware
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from telegram import Update
