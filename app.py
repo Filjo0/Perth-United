@@ -1,16 +1,22 @@
+# app.py
+#
+# This is the main server for your app. It is a Flask API,
+# a Telegram Bot, and a Scraper Scheduler all in one.
+
 import asyncio
 import atexit
 import logging
-import os  # <-- Reads Environment Variables
+import os  # Reads Environment Variables
+import re
 import sqlite3
 import threading
 
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, jsonify, request, send_from_directory
-from flask_cors import CORS  # <-- Allows frontend to call API
-from telegram import Update, WebAppInfo
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from flask_cors import CORS
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Import the main function from your scraper script
 try:
@@ -20,7 +26,6 @@ except ImportError:
     exit(1)
 
 # --- Configuration ---
-# Reads the secret keys and URL from Render's Environment Variables
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 MINI_APP_URL = os.environ.get("MINI_APP_URL")
 
@@ -46,15 +51,14 @@ logger = logging.getLogger(__name__)
 # --- Database Setup (SQLite) ---
 def init_db():
     """Initializes the SQLite database tables."""
-    with sqlite3.connect(DB_FILE) as conn:
+    # Use check_same_thread=False to allow scheduler thread to write
+    with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
         cursor = conn.cursor()
-        # Stores user chat IDs for notifications
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS subscriptions (
             chat_id INTEGER PRIMARY KEY
         )
         ''')
-        # Stores last known fixtures to check for changes
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS fixtures (
             id TEXT PRIMARY KEY, division TEXT, date_time TEXT,
@@ -73,23 +77,23 @@ async def send_telegram_message(bot, chat_id, message_text):
     except Exception as e:
         logger.error(f"Failed to send message to {chat_id}: {e}")
         if "bot was blocked by the user" in str(e):
-            # User blocked the bot, remove them from subscriptions
-            with sqlite3.connect(DB_FILE) as conn:
+            with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
                 conn.cursor().execute("DELETE FROM subscriptions WHERE chat_id = ?", (chat_id,))
                 conn.commit()
                 logger.info(f"Removed unsubscribed user: {chat_id}")
 
 
 # --- Background Scraper & Notifier Job ---
-def scheduled_scraper_job(bot_instance):
+def scheduled_scraper_job(application_instance: Application):
     """
     This is the core job. It runs the scraper, compares data,
     and sends notifications to all subscribed users.
     """
     logger.info("--- [SCHEDULER]: Running scheduled scraper job... ---")
 
+    bot_instance = application_instance.bot
+
     try:
-        # 1. Run the async scraper from scraper.py
         msl_data = asyncio.run(get_division_data('MSL'))
         mslb_data = asyncio.run(get_division_data('MSLB'))
 
@@ -97,7 +101,6 @@ def scheduled_scraper_job(bot_instance):
             logger.warning("[SCHEDULER]: Scraping failed. Skipping update.")
             return
 
-        # 2. Combine and update the live cache for API commands
         global LIVE_CACHE
         new_fixtures = msl_data.get('fixtures', []) + mslb_data.get('fixtures', [])
         LIVE_CACHE['players'] = msl_data.get('players', []) + mslb_data.get('players', [])
@@ -108,8 +111,7 @@ def scheduled_scraper_job(bot_instance):
 
         logger.info(f"[SCHEDULER]: Live cache updated. Found {len(new_fixtures)} total fixtures.")
 
-        # 3. Check for changed game times
-        with sqlite3.connect(DB_FILE) as conn:
+        with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
             cursor = conn.cursor()
             old_fixtures_q = cursor.execute("SELECT id, date_time FROM fixtures").fetchall()
             old_fixtures_map = {row[0]: row[1] for row in old_fixtures_q}
@@ -117,10 +119,15 @@ def scheduled_scraper_job(bot_instance):
             notifications_to_send = []
 
             for new_fix in new_fixtures:
+                # Filter out played games before checking/storing
+                score_str = str(new_fix.get('score', '')).strip().lower()
+                is_played = re.search(r'\d+\s*-\s*\d+', score_str)
+                if is_played:
+                    continue  # Skip played games
+
                 old_date_time = old_fixtures_map.get(new_fix['id'])
 
                 if old_date_time and old_date_time != new_fix['date_time']:
-                    # CHANGE DETECTED!
                     logger.info(f"*** CHANGE DETECTED for {new_fix['id']} ***")
                     title = f"🚨 Game Time Change: {new_fix['division']} 🚨"
                     body = (
@@ -130,7 +137,6 @@ def scheduled_scraper_job(bot_instance):
                     )
                     notifications_to_send.append(f"{title}\n{body}")
 
-                # Update or Insert the new fixture data
                 cursor.execute(
                     "INSERT OR REPLACE INTO fixtures (id, division, date_time, opponent, location, score, round) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (new_fix.get('id'), new_fix.get('division'), new_fix.get('date_time'), new_fix.get('opponent'),
@@ -139,19 +145,20 @@ def scheduled_scraper_job(bot_instance):
 
             conn.commit()
 
-            # 4. Send all notifications
             if notifications_to_send:
                 all_subs = cursor.execute("SELECT chat_id FROM subscriptions").fetchall()
                 full_message = "\n\n".join(notifications_to_send)
+                # Create a new event loop in this thread to send messages
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 for (chat_id,) in all_subs:
-                    # We must run the async send function in a new event loop
-                    # because APScheduler runs in a separate thread.
-                    asyncio.run(send_telegram_message(bot_instance, chat_id, full_message))
+                    loop.run_until_complete(send_telegram_message(bot_instance, chat_id, full_message))
+                loop.close()
 
         logger.info("--- [SCHEDULER]: Job finished. ---")
 
     except Exception as e:
-        logger.error(f"!!! [SCHEDULER]: CRITICAL ERROR during job: {e}")
+        logger.error(f"!!! [SCHEDULER]: CRITICAL ERROR during job: {e}", exc_info=True)
 
 
 # --- Flask API Server (Serves data to the React App) ---
@@ -169,45 +176,41 @@ def serve_mini_app():
 @app.route('/api/stats')
 def get_all_stats():
     """Returns all data in one big JSON blob."""
-    return jsonify(LIVE_CACHE)
+    # Filter fixtures to only show upcoming ones
+    all_fixtures = LIVE_CACHE.get('fixtures', [])
+    upcoming_fixtures = []
+    for f in all_fixtures:
+        score_str = str(f.get('score', '')).strip().lower()
+        is_played = re.search(r'\d+\s*-\s*\d+', score_str)
+        if not is_played:
+            upcoming_fixtures.append(f)
+
+    response = {
+        "players": LIVE_CACHE.get('players', []),
+        "fixtures": upcoming_fixtures,
+        "msl_ladder": LIVE_CACHE.get('msl_ladder', []),
+        "mslb_ladder": LIVE_CACHE.get('mslb_ladder', []),
+        "last_updated": LIVE_CACHE.get('last_updated')
+    }
+    return jsonify(response)
 
 
-@app.route('/api/players')
-def get_players():
-    """Returns player data, with optional sorting."""
-    sort_by = request.args.get('sort', 'goals')
-    order = request.args.get('order', 'desc')
-    players = LIVE_CACHE.get('players', [])
-
-    if not players:
-        return jsonify({"error": "No player data available. Cache might be building."}), 503
-
-    try:
-        is_reverse = (order == 'desc')
-        # Sort by the primary key (e.g., goals), and then by 'appearances' as a tie-breaker
-        sorted_players = sorted(
-            players,
-            key=lambda p: (p.get(sort_by, 0), p.get('appearances', 0)),
-            reverse=is_reverse
-        )
-        return jsonify(sorted_players)
-    except Exception as e:
-        return jsonify({"error": f"Invalid sort key: {e}"}), 400
-
-
-@app.route('/api/fixtures')
-def get_fixtures():
-    """Returns all fixtures."""
-    return jsonify(LIVE_CACHE.get('fixtures', []))
+@app.route('/health')
+def health_check():
+    """A simple health check endpoint for Render."""
+    return jsonify({
+        "status": "ok",
+        "last_updated": LIVE_CHARGE.get('last_updated'),
+        "players_cached": len(LIVE_CACHE.get('players', [])),
+        "fixtures_cached": len(LIVE_CACHE.get('fixtures', []))
+    })
 
 
 # --- Telegram Bot Logic ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handles the /start command. Subscribes user and shows 'Open App' button."""
     chat_id = update.effective_chat.id
-
-    # Save user to database
-    with sqlite3.connect(DB_FILE) as conn:
+    with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
         conn.cursor().execute("INSERT OR IGNORE INTO subscriptions (chat_id) VALUES (?)", (chat_id,))
         conn.commit()
 
@@ -223,7 +226,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-def start_bot_and_scheduler():
+async def start_bot_and_scheduler():
     """Initializes and starts the Telegram bot and the background scheduler."""
 
     if not TELEGRAM_BOT_TOKEN:
@@ -240,18 +243,25 @@ def start_bot_and_scheduler():
         scheduled_scraper_job,
         'interval',
         minutes=SCRAPE_INTERVAL_MINUTES,
-        args=[application.bot]
+        args=[application]  # Pass the full application
     )
     scheduler.start()
 
     # Run the first scrape immediately in a background thread
-    threading.Thread(target=scheduled_scraper_job, args=(application.bot,), daemon=True).start()
+    threading.Thread(target=scheduled_scraper_job, args=(application,), daemon=True).start()
     atexit.register(lambda: scheduler.shutdown())
 
     application.add_handler(CommandHandler("start", start_command))
 
-    print("Bot is polling...")
-    application.run_polling()
+    logger.info("Bot is polling...")
+    await application.run_polling()
+
+
+def run_bot_in_thread():
+    """Sets up a new event loop for the bot in its own thread."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(start_bot_and_scheduler())
 
 
 # --- Main Startup Function ---
@@ -259,11 +269,10 @@ if __name__ == '__main__':
     init_db()
 
     # Run the Bot in a separate thread
-    bot_thread = threading.Thread(target=asyncio.run, args=(start_bot_and_scheduler(),), daemon=True)
+    bot_thread = threading.Thread(target=run_bot_in_thread, daemon=True)
     bot_thread.start()
 
-    print("Starting Flask API server on http://0.0.0.0:5000...")
+    logger.info("Starting Flask API server...")
     # Run Flask in the main thread (Render expects this)
-    # Render's port is set by the PORT env var, default to 5000 for local
     port = int(os.environ.get('PORT', 5000))
     app.run(port=port, host='0.0.0.0', debug=False)
