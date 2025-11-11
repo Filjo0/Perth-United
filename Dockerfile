@@ -8,6 +8,7 @@ FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
 WORKDIR /app
 
 # 3. Copy your requirements file first and install Python libraries
+# (This is cached by Docker to speed up future builds)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

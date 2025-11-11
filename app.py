@@ -14,8 +14,8 @@ import pandas as pd
 import uvicorn  # For running Flask asynchronously
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-from telegram import Update, WebAppInfo
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Import the main function from your scraper script
 try:
@@ -131,7 +131,7 @@ async def scheduled_scraper_job(context: ContextTypes.DEFAULT_TYPE):
                 all_subs = cursor.execute("SELECT chat_id FROM subscriptions").fetchall()
                 full_message = "\n\n".join(notifications_to_send)
                 for (chat_id,) in all_subs:
-                    # No need to create a new loop, just await the send
+                    # We can safely await because we are in the same async loop
                     await send_telegram_message(application_instance.bot, chat_id[0], full_message)
 
         logger.info("--- [SCHEDULER]: Job finished. ---")
@@ -167,7 +167,13 @@ def get_all_stats():
 
 @app.route('/health')
 def health_check():
-    return jsonify({"status": "ok", "last_updated": LIVE_CACHE.get('last_updated')})
+    """A simple health check endpoint for Render."""
+    return jsonify({
+        "status": "ok",
+        "last_updated": LIVE_CACHE.get('last_updated'),
+        "players_cached": len(LIVE_CACHE.get('players', [])),
+        "fixtures_cached": len(LIVE_CACHE.get('fixtures', []))
+    })
 
 
 # --- Telegram Bot Logic ---
@@ -209,7 +215,9 @@ async def main():
 
     # --- Schedule the scraper job using the bot's job queue ---
     job_queue = application.job_queue
-    job_queue.run_once(scheduled_scraper_job, 5)  # Run 5 seconds after startup
+    # Run 5 seconds after startup
+    job_queue.run_once(scheduled_scraper_job, 5)
+    # Run every X minutes
     job_queue.run_repeating(scheduled_scraper_job, interval=SCRAPE_INTERVAL_MINUTES * 60)
 
     # --- Start the Flask server as an async task ---
@@ -219,9 +227,9 @@ async def main():
     config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(config)
 
-    logger.info("Starting Flask server with Uvicorn...")
+    logger.info(f"Starting Flask server on port {port}...")
 
-    # Run the bot and the server concurrently
+    # Run the bot and the server concurrently in the same event loop
     await asyncio.gather(
         application.run_polling(stop_signals=None, drop_pending_updates=True),
         server.serve()

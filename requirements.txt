@@ -1,7 +1,6 @@
 flask
 flask-cors
 python-telegram-bot>=21.0
-apscheduler
 pandas
 playwright
-uvicorn
+uvicorn[standard]
