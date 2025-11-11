@@ -9,14 +9,9 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
     <!--
-      2. All library scripts are loaded in the <head> without 'defer'.
-      This makes them block rendering, but guarantees they exist before
-      the <body> script runs.
+      All other scripts are MOVED from the <head> to the <body>
+      to prevent the race condition.
     -->
-    <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tanstack/react-query@5/dist/umd/react-query.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <!-- 5. Simple Styling -->
     <style>
@@ -68,8 +63,18 @@
     <div id="root"></div>
 
     <!--
-      THIS SCRIPT IS MOVED TO THE END OF THE <body>
-      AND THE 'window.onload' WRAPPER IS REMOVED.
+      *** THIS IS THE FIX ***
+      All library scripts are moved here, at the end of the <body>.
+      The browser will load and execute them in this exact order
+      before it reaches your main application script.
+    -->
+    <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tanstack/react-query@5/dist/umd/react-query.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!--
+      Your app script now runs last, *after* React and ReactQuery are guaranteed to be loaded.
     -->
     <script type="text/babel">
         // --- Setup ---
@@ -106,6 +111,7 @@
 
             const sortedPlayers = useMemo(() => {
                 return [...players].sort((a, b) => {
+                    // Use .get() for safety, defaulting to 0
                     return (b[sortBy] || 0) - (a[sortBy] || 0);
                 });
             }, [players, sortBy]);
