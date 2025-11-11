@@ -6,7 +6,7 @@
 import asyncio
 import atexit
 import logging
-import os  # Reads Environment Variables
+import os
 import re
 import sqlite3
 import threading
@@ -16,7 +16,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from telegram import Update, WebAppInfo
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Import the main function from your scraper script
 try:
@@ -28,11 +28,9 @@ except ImportError:
 # --- Configuration ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 MINI_APP_URL = os.environ.get("MINI_APP_URL")
-
 SCRAPE_INTERVAL_MINUTES = 15
 DB_FILE = "futsal_data.db"
 
-# In-memory cache for fast API responses
 LIVE_CACHE = {
     'players': [],
     'fixtures': [],
@@ -41,7 +39,6 @@ LIVE_CACHE = {
     'last_updated': None
 }
 
-# Setup logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -50,8 +47,6 @@ logger = logging.getLogger(__name__)
 
 # --- Database Setup (SQLite) ---
 def init_db():
-    """Initializes the SQLite database tables."""
-    # Use check_same_thread=False to allow scheduler thread to write
     with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -70,7 +65,6 @@ def init_db():
 
 # --- Push Notification Logic ---
 async def send_telegram_message(bot, chat_id, message_text):
-    """Utility function to send a message to a specific user."""
     try:
         await bot.send_message(chat_id=chat_id, text=message_text)
         logger.info(f"Sent message to {chat_id}")
@@ -85,12 +79,7 @@ async def send_telegram_message(bot, chat_id, message_text):
 
 # --- Background Scraper & Notifier Job ---
 def scheduled_scraper_job(application_instance: Application):
-    """
-    This is the core job. It runs the scraper, compares data,
-    and sends notifications to all subscribed users.
-    """
     logger.info("--- [SCHEDULER]: Running scheduled scraper job... ---")
-
     bot_instance = application_instance.bot
 
     try:
@@ -119,11 +108,10 @@ def scheduled_scraper_job(application_instance: Application):
             notifications_to_send = []
 
             for new_fix in new_fixtures:
-                # Filter out played games before checking/storing
                 score_str = str(new_fix.get('score', '')).strip().lower()
                 is_played = re.search(r'\d+\s*-\s*\d+', score_str)
                 if is_played:
-                    continue  # Skip played games
+                    continue
 
                 old_date_time = old_fixtures_map.get(new_fix['id'])
 
@@ -148,7 +136,6 @@ def scheduled_scraper_job(application_instance: Application):
             if notifications_to_send:
                 all_subs = cursor.execute("SELECT chat_id FROM subscriptions").fetchall()
                 full_message = "\n\n".join(notifications_to_send)
-                # Create a new event loop in this thread to send messages
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 for (chat_id,) in all_subs:
@@ -163,19 +150,17 @@ def scheduled_scraper_job(application_instance: Application):
 
 # --- Flask API Server (Serves data to the React App) ---
 app = Flask(__name__, static_folder='public', static_url_path='')
-CORS(app, resources={r"/api/*": {"origins": "*"}})  # Allow web app to call API
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 
 # --- API Routes ---
 @app.route('/')
 def serve_mini_app():
-    """Serves the main index.html file for the Telegram Mini App."""
     return send_from_directory('public', 'index.html')
 
 
 @app.route('/api/stats')
 def get_all_stats():
-    """Returns all data in one big JSON blob."""
     all_fixtures = LIVE_CACHE.get('fixtures', [])
     upcoming_fixtures = []
     for f in all_fixtures:
@@ -196,7 +181,6 @@ def get_all_stats():
 
 @app.route('/health')
 def health_check():
-    """A simple health check endpoint for Render."""
     return jsonify({
         "status": "ok",
         "last_updated": LIVE_CACHE.get('last_updated'),
@@ -207,7 +191,6 @@ def health_check():
 
 # --- Telegram Bot Logic ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the /start command. Subscribes user and shows 'Open App' button."""
     chat_id = update.effective_chat.id
     with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
         conn.cursor().execute("INSERT OR IGNORE INTO subscriptions (chat_id) VALUES (?)", (chat_id,))
@@ -232,7 +215,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start_bot_and_scheduler():
-    """Initializes and starts the Telegram bot and the background scheduler."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     app_url = os.environ.get("MINI_APP_URL")
 
@@ -250,7 +232,7 @@ async def start_bot_and_scheduler():
         scheduled_scraper_job,
         'interval',
         minutes=SCRAPE_INTERVAL_MINUTES,
-        args=[application]  # Pass the full application
+        args=[application]
     )
     scheduler.start()
 
@@ -258,11 +240,11 @@ async def start_bot_and_scheduler():
     application.job_queue.run_once(lambda ctx: asyncio.create_task(scheduled_scraper_job(application)), 5)
 
     atexit.register(lambda: scheduler.shutdown())
-
     application.add_handler(CommandHandler("start", start_command))
 
     logger.info("Bot is polling...")
-    # This is the fix for the thread crash
+    # --- THIS IS THE FIX ---
+    # Tell the bot not to listen for signals, since it's in a thread
     await application.run_polling(stop_signals=None)
 
 
@@ -277,11 +259,10 @@ def run_bot_in_thread():
 if __name__ == '__main__':
     init_db()
 
-    # Run the Bot in a separate thread
     bot_thread = threading.Thread(target=run_bot_in_thread, daemon=True)
     bot_thread.start()
 
     logger.info("Starting Flask API server...")
-    # Run Flask in the main thread (Render expects this)
-    port = int(os.environ.get('PORT', 5000))
+    # Render's port is set by the PORT env var, default to 10000
+    port = int(os.environ.get('PORT', 10000))
     app.run(port=port, host='0.0.0.0', debug=False)
