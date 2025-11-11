@@ -1,22 +1,21 @@
 # app.py
 #
-# This is the main server for your app. It is a Flask API,
-# a Telegram Bot, and a Scraper Scheduler all in one.
+# FINAL VERSION
+# This runs Flask and the Telegram Bot in the same process
+# using the bot's built-in job queue for scheduling.
 
 import asyncio
-import atexit
 import logging
 import os
 import re
 import sqlite3
-import threading
 
 import pandas as pd
-from apscheduler.schedulers.background import BackgroundScheduler
+import uvicorn  # For running Flask asynchronously
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from telegram import Update, WebAppInfo
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 # Import the main function from your scraper script
 try:
@@ -32,11 +31,7 @@ SCRAPE_INTERVAL_MINUTES = 15
 DB_FILE = "futsal_data.db"
 
 LIVE_CACHE = {
-    'players': [],
-    'fixtures': [],
-    'msl_ladder': [],
-    'mslb_ladder': [],
-    'last_updated': None
+    'players': [], 'fixtures': [], 'msl_ladder': [], 'mslb_ladder': [], 'last_updated': None
 }
 
 logging.basicConfig(
@@ -49,17 +44,11 @@ logger = logging.getLogger(__name__)
 def init_db():
     with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
         cursor = conn.cursor()
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS subscriptions (
-            chat_id INTEGER PRIMARY KEY
-        )
-        ''')
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS fixtures (
+        cursor.execute('''CREATE TABLE IF NOT EXISTS subscriptions (chat_id INTEGER PRIMARY KEY)''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS fixtures (
             id TEXT PRIMARY KEY, division TEXT, date_time TEXT,
             opponent TEXT, location TEXT, score TEXT, round TEXT
-        )
-        ''')
+        )''')
         conn.commit()
 
 
@@ -78,13 +67,18 @@ async def send_telegram_message(bot, chat_id, message_text):
 
 
 # --- Background Scraper & Notifier Job ---
-def scheduled_scraper_job(application_instance: Application):
+async def scheduled_scraper_job(context: ContextTypes.DEFAULT_TYPE):
+    """
+    This is the core job, run by the bot's JobQueue.
+    It runs the scraper, compares data, and sends notifications.
+    """
     logger.info("--- [SCHEDULER]: Running scheduled scraper job... ---")
-    bot_instance = application_instance.bot
+
+    application_instance = context.application
 
     try:
-        msl_data = asyncio.run(get_division_data('MSL'))
-        mslb_data = asyncio.run(get_division_data('MSLB'))
+        msl_data = await get_division_data('MSL')
+        mslb_data = await get_division_data('MSLB')
 
         if not msl_data or not mslb_data:
             logger.warning("[SCHEDULER]: Scraping failed. Skipping update.")
@@ -136,11 +130,9 @@ def scheduled_scraper_job(application_instance: Application):
             if notifications_to_send:
                 all_subs = cursor.execute("SELECT chat_id FROM subscriptions").fetchall()
                 full_message = "\n\n".join(notifications_to_send)
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
                 for (chat_id,) in all_subs:
-                    loop.run_until_complete(send_telegram_message(bot_instance, chat_id, full_message))
-                loop.close()
+                    # No need to create a new loop, just await the send
+                    await send_telegram_message(application_instance.bot, chat_id[0], full_message)
 
         logger.info("--- [SCHEDULER]: Job finished. ---")
 
@@ -148,12 +140,11 @@ def scheduled_scraper_job(application_instance: Application):
         logger.error(f"!!! [SCHEDULER]: CRITICAL ERROR during job: {e}", exc_info=True)
 
 
-# --- Flask API Server (Serves data to the React App) ---
+# --- Flask API Server ---
 app = Flask(__name__, static_folder='public', static_url_path='')
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 
-# --- API Routes ---
 @app.route('/')
 def serve_mini_app():
     return send_from_directory('public', 'index.html')
@@ -162,12 +153,7 @@ def serve_mini_app():
 @app.route('/api/stats')
 def get_all_stats():
     all_fixtures = LIVE_CACHE.get('fixtures', [])
-    upcoming_fixtures = []
-    for f in all_fixtures:
-        score_str = str(f.get('score', '')).strip().lower()
-        is_played = re.search(r'\d+\s*-\s*\d+', score_str)
-        if not is_played:
-            upcoming_fixtures.append(f)
+    upcoming_fixtures = [f for f in all_fixtures if not re.search(r'\d+\s*-\s*\d+', str(f.get('score', '')).strip())]
 
     response = {
         "players": LIVE_CACHE.get('players', []),
@@ -181,88 +167,66 @@ def get_all_stats():
 
 @app.route('/health')
 def health_check():
-    return jsonify({
-        "status": "ok",
-        "last_updated": LIVE_CACHE.get('last_updated'),
-        "players_cached": len(LIVE_CACHE.get('players', [])),
-        "fixtures_cached": len(LIVE_CACHE.get('fixtures', []))
-    })
+    return jsonify({"status": "ok", "last_updated": LIVE_CACHE.get('last_updated')})
 
 
 # --- Telegram Bot Logic ---
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
-        conn.cursor().execute("INSERT OR IGNORE INTO subscriptions (chat_id) VALUES (?)", (chat_id,))
+        conn.execute("INSERT OR IGNORE INTO subscriptions (chat_id) VALUES (?)", (chat_id,))
         conn.commit()
 
-    app_url = os.environ.get("MINI_APP_URL", "")
-    if not app_url:
-        logger.error("Cannot show button, MINI_APP_URL is not set.")
-        await update.message.reply_text("Bot is not fully configured. Please contact admin.")
-        return
-
     await update.message.reply_text(
-        "Welcome to the Perth United Bot! ⚽️\n\n"
-        "You are subscribed for game time updates.\n\n"
-        "Click the 'Open App' button below to see stats, ladders, and the calendar.",
+        "Welcome to Perth United Stats! ⚽️",
         reply_markup={
-            "inline_keyboard": [
-                [{"text": "🚀 Open Stats App", "web_app": {"url": app_url}}]
-            ]
+            "inline_keyboard": [[{
+                "text": "🚀 Open App",
+                "web_app": {"url": MINI_APP_URL}
+            }]]
         }
     )
 
 
-async def start_bot_and_scheduler():
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    app_url = os.environ.get("MINI_APP_URL")
+async def main():
+    """Starts the Flask server and the Telegram bot."""
 
-    if not token:
-        logger.error("!!! ERROR: TELEGRAM_BOT_TOKEN environment variable is not set. Bot thread cannot start.")
+    if not TELEGRAM_BOT_TOKEN:
+        logger.error("!!! ERROR: TELEGRAM_BOT_TOKEN environment variable is not set.")
         return
-    if not app_url:
-        logger.error("!!! ERROR: MINI_APP_URL environment variable is not set. Bot thread cannot start.")
+    if not MINI_APP_URL or "your-frontend-app-url.com" in MINI_APP_URL:
+        logger.error("!!! ERROR: MINI_APP_URL environment variable is not set.")
         return
 
-    application = Application.builder().token(token).build()
-
-    scheduler = BackgroundScheduler(daemon=True)
-    scheduler.add_job(
-        scheduled_scraper_job,
-        'interval',
-        minutes=SCRAPE_INTERVAL_MINUTES,
-        args=[application]
-    )
-    scheduler.start()
-
-    # Run the first scrape immediately in a non-blocking way
-    application.job_queue.run_once(lambda ctx: asyncio.create_task(scheduled_scraper_job(application)), 5)
-
-    atexit.register(lambda: scheduler.shutdown())
-    application.add_handler(CommandHandler("start", start_command))
-
-    logger.info("Bot is polling...")
-    # --- THIS IS THE FIX ---
-    # Tell the bot not to listen for signals, since it's in a thread
-    await application.run_polling(stop_signals=None)
-
-
-def run_bot_in_thread():
-    """Sets up a new event loop for the bot in its own thread."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(start_bot_and_scheduler())
-
-
-# --- Main Startup Function ---
-if __name__ == '__main__':
+    # Initialize the DB
     init_db()
 
-    bot_thread = threading.Thread(target=run_bot_in_thread, daemon=True)
-    bot_thread.start()
+    # Create the Telegram Application
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    logger.info("Starting Flask API server...")
-    # Render's port is set by the PORT env var, default to 10000
+    # Add the /start command handler
+    application.add_handler(CommandHandler("start", start))
+
+    # --- Schedule the scraper job using the bot's job queue ---
+    job_queue = application.job_queue
+    job_queue.run_once(scheduled_scraper_job, 5)  # Run 5 seconds after startup
+    job_queue.run_repeating(scheduled_scraper_job, interval=SCRAPE_INTERVAL_MINUTES * 60)
+
+    # --- Start the Flask server as an async task ---
     port = int(os.environ.get('PORT', 10000))
-    app.run(port=port, host='0.0.0.0', debug=False)
+
+    # Use Uvicorn to run Flask (app) as an async-compatible server
+    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
+    server = uvicorn.Server(config)
+
+    logger.info("Starting Flask server with Uvicorn...")
+
+    # Run the bot and the server concurrently
+    await asyncio.gather(
+        application.run_polling(stop_signals=None, drop_pending_updates=True),
+        server.serve()
+    )
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
