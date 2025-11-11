@@ -1,5 +1,4 @@
-# requirements.txt
-Flask
+flask
 flask-cors
 python-telegram-bot>=21.0
 apscheduler

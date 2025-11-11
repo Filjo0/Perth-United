@@ -15,8 +15,8 @@ import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, WebAppInfo
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 # Import the main function from your scraper script
 try:
@@ -176,7 +176,6 @@ def serve_mini_app():
 @app.route('/api/stats')
 def get_all_stats():
     """Returns all data in one big JSON blob."""
-    # Filter fixtures to only show upcoming ones
     all_fixtures = LIVE_CACHE.get('fixtures', [])
     upcoming_fixtures = []
     for f in all_fixtures:
@@ -200,7 +199,7 @@ def health_check():
     """A simple health check endpoint for Render."""
     return jsonify({
         "status": "ok",
-        "last_updated": LIVE_CHARGE.get('last_updated'),
+        "last_updated": LIVE_CACHE.get('last_updated'),
         "players_cached": len(LIVE_CACHE.get('players', [])),
         "fixtures_cached": len(LIVE_CACHE.get('fixtures', []))
     })
@@ -214,13 +213,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.cursor().execute("INSERT OR IGNORE INTO subscriptions (chat_id) VALUES (?)", (chat_id,))
         conn.commit()
 
+    app_url = os.environ.get("MINI_APP_URL", "")
+    if not app_url:
+        logger.error("Cannot show button, MINI_APP_URL is not set.")
+        await update.message.reply_text("Bot is not fully configured. Please contact admin.")
+        return
+
     await update.message.reply_text(
         "Welcome to the Perth United Bot! ⚽️\n\n"
         "You are subscribed for game time updates.\n\n"
         "Click the 'Open App' button below to see stats, ladders, and the calendar.",
         reply_markup={
             "inline_keyboard": [
-                [{"text": "🚀 Open Stats App", "web_app": {"url": MINI_APP_URL}}]
+                [{"text": "🚀 Open Stats App", "web_app": {"url": app_url}}]
             ]
         }
     )
@@ -228,15 +233,17 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_bot_and_scheduler():
     """Initializes and starts the Telegram bot and the background scheduler."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    app_url = os.environ.get("MINI_APP_URL")
 
-    if not TELEGRAM_BOT_TOKEN:
-        logger.error("!!! ERROR: TELEGRAM_BOT_TOKEN environment variable is not set.")
+    if not token:
+        logger.error("!!! ERROR: TELEGRAM_BOT_TOKEN environment variable is not set. Bot thread cannot start.")
         return
-    if not MINI_APP_URL:
-        logger.error("!!! ERROR: MINI_APP_URL environment variable is not set.")
+    if not app_url:
+        logger.error("!!! ERROR: MINI_APP_URL environment variable is not set. Bot thread cannot start.")
         return
 
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    application = Application.builder().token(token).build()
 
     scheduler = BackgroundScheduler(daemon=True)
     scheduler.add_job(
@@ -247,14 +254,16 @@ async def start_bot_and_scheduler():
     )
     scheduler.start()
 
-    # Run the first scrape immediately in a background thread
-    threading.Thread(target=scheduled_scraper_job, args=(application,), daemon=True).start()
+    # Run the first scrape immediately in a non-blocking way
+    application.job_queue.run_once(lambda ctx: asyncio.create_task(scheduled_scraper_job(application)), 5)
+
     atexit.register(lambda: scheduler.shutdown())
 
     application.add_handler(CommandHandler("start", start_command))
 
     logger.info("Bot is polling...")
-    await application.run_polling()
+    # This is the fix for the thread crash
+    await application.run_polling(stop_signals=None)
 
 
 def run_bot_in_thread():
