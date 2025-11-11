@@ -2,15 +2,14 @@
 
 import asyncio
 import logging
-import os
-import re
 import sqlite3
-
+import re
 import pandas as pd
+import os
 import uvicorn  # For running Flask asynchronously
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-from telegram import Update, WebAppInfo
+from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Import the main function from your scraper script
@@ -127,7 +126,6 @@ async def scheduled_scraper_job(context: ContextTypes.DEFAULT_TYPE):
                 all_subs = cursor.execute("SELECT chat_id FROM subscriptions").fetchall()
                 full_message = "\n\n".join(notifications_to_send)
                 for (chat_id,) in all_subs:
-                    # We are already in an async job, so just await
                     await send_telegram_message(application_instance.bot, chat_id[0], full_message)
 
         logger.info("--- [SCHEDULER]: Job finished. ---")
@@ -215,7 +213,6 @@ async def main():
     job_queue.run_repeating(scheduled_scraper_job, interval=SCRAPE_INTERVAL_MINUTES * 60)
 
     # --- Start the Flask server as an async task ---
-    # Render's PORT env var is 10000 by default
     port = int(os.environ.get('PORT', 10000))
 
     # Use Uvicorn to run Flask (app) as an async-compatible server
@@ -225,10 +222,6 @@ async def main():
     logger.info(f"Starting Flask server on port {port}...")
 
     # --- THIS IS THE FIX ---
-    # This replaces the entire asyncio.gather block
-    # We initialize the bot, start its job queue, and then run polling
-    # and the server concurrently. This is the official way.
-
     # 1. Initialize the bot (this creates the job_queue)
     await application.initialize()
 
@@ -239,13 +232,12 @@ async def main():
     server_task = asyncio.create_task(server.serve())
 
     # 4. Start the bot polling task
-    # We use updater.start_polling, which is the non-blocking version
-    # of run_polling.
-    await application.updater.start_polling(stop_signals=None, drop_pending_updates=True)
+    # We remove 'stop_signals=None' as it's not a valid argument here
+    await application.updater.start_polling(drop_pending_updates=True)
+    # --- END OF FIX ---
 
     # Wait for both tasks to run
     await asyncio.gather(server_task)
-    # --- END OF FIX ---
 
 
 if __name__ == '__main__':
