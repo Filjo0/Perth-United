@@ -2,7 +2,7 @@ Flask
 flask-cors
 python-telegram-bot[job-queue]
 pandas
-playwright
+playwright==1.55.0
 lxml
 uvicorn
 a2wsgi
