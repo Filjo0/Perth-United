@@ -5,213 +5,273 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no, user-scalable=no" />
     <title>Perth United Stats</title>
     
-    <!-- 1. Telegram Mini App Script -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     
-    <!-- 5. Simple Styling -->
-    <style>
-        :root {
-            --tg-bg: #ffffff;
-            --tg-text: #000000;
-            --tg-hint: #999999;
-            --tg-button: #2481cc;
-            --tg-button-text: #ffffff;
-            --tg-secondary-bg: #f4f4f4;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: var(--tg-bg);
-            color: var(--tg-text);
-            margin: 0;
-            padding: 15px;
-            box-sizing: border-box;
-        }
-        .container { max-width: 600px; margin: 0 auto; }
-        .card {
-            background: var(--tg-secondary-bg);
-            border-radius: 12px;
-            padding: 12px 16px;
-            margin-bottom: 12px;
-        }
-        .card h3 { margin: 0 0 8px 0; font-size: 1.1em; }
-        .card p { margin: 0; font-size: 0.9em; color: var(--tg-hint); }
-        .card .stats { color: var(--tg-text); font-weight: 500; }
-        
-        .loading { text-align: center; padding: 40px; color: var(--tg-hint); font-weight: 500; }
-        .error { text-align: center; padding: 40px; color: #E53E3E; font-weight: 500; }
-        
-        .nav { display: flex; gap: 8px; margin-bottom: 16px; }
-        .nav button {
-            flex: 1; padding: 12px; border: none;
-            background: var(--tg-secondary-bg);
-            color: var(--tg-text);
-            border-radius: 8px; font-weight: bold; font-size: 1em;
-            cursor: pointer;
-        }
-        .nav button.active {
-            background: var(--tg-button);
-            color: var(--tg-button-text);
-        }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
-
-    <!-- Library Scripts (in correct order) -->
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tanstack/react-query@5/dist/umd/react-query.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+    <style>
+        :root {
+            --tg-bg: var(--tg-theme-bg-color, #fff);
+            --tg-text: var(--tg-theme-text-color, #000);
+            --tg-hint: var(--tg-theme-hint-color, #999);
+            --tg-link: var(--tg-theme-link-color, #2481cc);
+            --tg-button: var(--tg-theme-button-color, #2481cc);
+            --tg-button-text: var(--tg-theme-button-text-color, #fff);
+            --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #f4f4f4);
+        }
+        body { background-color: var(--tg-secondary-bg); color: var(--tg-text); font-family: -apple-system, sans-serif; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
     <script type="text/babel">
-        // Wait for EVERYTHING to load before running React
-        window.onload = () => {
-            
-            // --- Setup ---
-            const { useState, useEffect, useMemo } = React;
-            
-            // Correctly access the library global
-            const { QueryClient, QueryClientProvider, useQuery } = window.ReactQuery;
-            
-            const queryClient = new QueryClient();
-            const API_BASE_URL = ""; 
-            
-            // --- API Fetching Functions ---
-            const fetchAllStats = async () => {
-                const res = await fetch(`${API_BASE_URL}/api/stats`); 
-                if (!res.ok) throw new Error('Network response was not ok');
-                return res.json();
-            };
+        const { useState, useEffect, useMemo } = React;
+        const { QueryClient, QueryClientProvider, useQuery } = window.ReactQuery;
+        const queryClient = new QueryClient();
+        const API_BASE_URL = ""; 
 
-            // --- React Components ---
-            function PlayerStats() {
-                const { data, isLoading, error } = useQuery({ 
-                    queryKey: ['stats'], 
-                    queryFn: fetchAllStats 
-                });
-                
-                const [sortBy, setSortBy] = useState('goals');
+        // --- Icons (Inline SVGs for performance) ---
+        const IconCalendar = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>;
+        const IconHistory = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v5h5"></path><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"></path><path d="M12 7v5l4 2"></path></svg>;
+        const IconUsers = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>;
+        const IconTrophy = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path><path d="M4 22h16"></path><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path></svg>;
 
-                if (isLoading) return <div className="loading">Loading Players...</div>;
-                if (error) return <div className="error">Error loading stats: {error.message}</div>;
+        // --- Components ---
 
-                const players = data?.players || [];
-                
-                const sortedPlayers = useMemo(() => {
-                    return [...players].sort((a, b) => {
-                        return (b[sortBy] || 0) - (a[sortBy] || 0);
-                    });
-                }, [players, sortBy]);
+        const TabButton = ({ active, label, icon, onClick }) => (
+            <button 
+                onClick={onClick}
+                className={`flex-1 py-3 text-sm font-medium transition-colors border-b-2 flex flex-col items-center gap-1 ${
+                    active 
+                    ? 'border-[var(--tg-button)] text-[var(--tg-button)]' 
+                    : 'border-transparent text-[var(--tg-hint)] opacity-70'
+                }`}
+            >
+                {icon}
+                <span className="text-[10px] uppercase tracking-wide">{label}</span>
+            </button>
+        );
 
-                return (
-                    <div>
-                        <div className="nav">
-                            <button className={sortBy === 'goals' ? 'active' : ''} onClick={() => setSortBy('goals')}>Goals</button>
-                            <button className={sortBy === 'assists' ? 'active' : ''} onClick={() => setSortBy('assists')}>Assists</button>
-                            <button className={sortBy === 'appearances' ? 'active' : ''} onClick={() => setSortBy('appearances')}>Apps</button>
-                        </div>
-                        {sortedPlayers.length === 0 && <div className="card"><p>No player stats found.</p></div>}
-                        {sortedPlayers.map((player, i) => (
-                            <div key={player.player_name + player.division} className="card">
-                                <h3>[{player.division}] {player.player_name}</h3>
-                                <p className="stats">
-                                    <strong>Goals:</strong> {player.goals} | 
-                                    <strong> Assists:</strong> {player.assists} |
-                                    <strong> Apps:</strong> {player.appearances}
-                                </p>
-                            </div>
-                        ))}
+        const FixtureCard = ({ f, isResult }) => {
+            // Simple logic to color code the division badge
+            const badgeColor = f.division === 'MSL' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800';
+            
+            return (
+                <div className="bg-[var(--tg-bg)] p-4 rounded-xl mb-3 shadow-sm border border-gray-100/10">
+                    <div className="flex justify-between items-center mb-3">
+                        <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider ${badgeColor}`}>
+                            {f.division}
+                        </span>
+                        <span className="text-xs text-[var(--tg-hint)] font-medium">{f.round}</span>
                     </div>
-                );
-            }
-
-            function FixturesCalendar() {
-                 const { data, isLoading, error } = useQuery({ 
-                    queryKey: ['stats'], 
-                    queryFn: fetchAllStats 
-                });
-
-                if (isLoading) return <div className="loading">Loading Fixtures...</div>;
-                if (error) return <div className="error">Error loading fixtures: {error.message}</div>;
-
-                const fixtures = data?.fixtures || [];
-
-                // Filter for upcoming games
-                const upcoming = useMemo(() => {
-                    return fixtures.filter(f => {
-                        const score_str = String(f.score || '').trim().toLowerCase();
-                        const isPlayed = score_str.match(/\d+\s*-\s*\d+/); 
-                        return !isPlayed;
-                    });
-                }, [fixtures]);
-
-                return (
-                    <div>
-                        {upcoming.length === 0 && (
-                            <div className="card">
-                                <p>No upcoming fixtures found.</p>
+                    
+                    <div className="flex justify-between items-center">
+                        <div className="flex flex-col">
+                            <span className="text-[10px] text-[var(--tg-hint)] uppercase mb-0.5">Opponent</span>
+                            <div className="font-bold text-[var(--tg-text)] text-lg leading-tight">{f.opponent}</div>
+                        </div>
+                        
+                        {isResult ? (
+                            <div className="text-xl font-black px-3 py-1 rounded bg-[var(--tg-secondary-bg)] text-[var(--tg-text)]">
+                                {f.score}
+                            </div>
+                        ) : (
+                            <div className="text-right">
+                                <div className="text-lg font-bold text-[var(--tg-button)]">{f.time || f.date_time.split(' ')[1]}</div>
+                                <div className="text-xs text-[var(--tg-hint)] font-medium">{f.date_time.split(' ')[0]}</div>
                             </div>
                         )}
-                        {upcoming.map((f, i) => (
-                             <div key={f.id || i} className="card">
-                                <h3>[{f.division}] Round {f.round}</h3>
-                                <p><strong>vs {f.opponent}</strong></p>
-                                <p className="stats">{f.date_time} at {f.location || 'TBC'}</p>
-                            </div>
-                        ))}
                     </div>
-                );
-            }
-
-            function App() {
-                const [view, setView] = useState('fixtures'); 
-
-                useEffect(() => {
-                    try {
-                        const tg = window.Telegram.WebApp;
-                        tg.ready();
-                        
-                        document.documentElement.style.setProperty('--tg-bg', tg.themeParams.bg_color || '#ffffff');
-                        document.documentElement.style.setProperty('--tg-text', tg.themeParams.text_color || '#000000');
-                        document.documentElement.style.setProperty('--tg-hint', tg.themeParams.hint_color || '#999999');
-                        document.documentElement.style.setProperty('--tg-button', tg.themeParams.button_color || '#2481cc');
-                        document.documentElement.style.setProperty('--tg-button-text', tg.themeParams.button_text_color || '#ffffff');
-                        document.documentElement.style.setProperty('--tg-secondary-bg', tg.themeParams.secondary_bg_color || '#f4f4f4');
-                        
-                        tg.expand();
-                    } catch (e) {
-                        console.warn("Telegram WebApp API not found. Running in browser mode.");
-                    }
-                }, []);
-
-                return (
-                    <div className="container">
-                        <div className="nav">
-                            <button 
-                                className={view === 'fixtures' ? 'active' : ''} 
-                                onClick={() => setView('fixtures')}>
-                                Fixtures
-                            </button>
-                            <button 
-                                className={view === 'stats' ? 'active' : ''} 
-                                onClick={() => setView('stats')}>
-                                Player Stats
-                            </button>
-                        </div>
-                        
-                        {view === 'fixtures' ? <FixturesCalendar /> : <PlayerStats />}
+                    
+                    <div className="mt-3 pt-3 border-t border-[var(--tg-hint)]/10 flex items-center text-xs text-[var(--tg-hint)]">
+                        <span className="mr-1">📍</span> {f.location || 'TBC'}
                     </div>
-                );
-            }
-
-            // --- Mount the App ---
-            const root = ReactDOM.createRoot(document.getElementById('root'));
-            root.render(
-                <QueryClientProvider client={queryClient}>
-                    <App />
-                </QueryClientProvider>
+                </div>
             );
-        }; // End of window.onload
+        };
+
+        const StatsTable = ({ players }) => {
+            const [sort, setSort] = useState('goals');
+            
+            const sorted = useMemo(() => {
+                return [...players].sort((a, b) => (b[sort] || 0) - (a[sort] || 0));
+            }, [players, sort]);
+
+            const Header = ({ label, id }) => (
+                <th 
+                    className={`p-3 text-xs font-semibold cursor-pointer select-none text-right ${
+                        sort === id ? 'text-[var(--tg-button)] bg-[var(--tg-button)]/10' : 'text-[var(--tg-hint)]'
+                    }`}
+                    onClick={() => setSort(id)}
+                >
+                    {label} {sort === id && '↓'}
+                </th>
+            );
+
+            return (
+                <div className="bg-[var(--tg-bg)] rounded-xl overflow-hidden shadow-sm">
+                    <table className="w-full text-left">
+                        <thead className="bg-[var(--tg-secondary-bg)] border-b border-[var(--tg-hint)]/10">
+                            <tr>
+                                <th className="p-3 text-xs text-[var(--tg-hint)] font-semibold uppercase tracking-wider">Player</th>
+                                <Header label="G" id="goals" />
+                                <Header label="A" id="assists" />
+                                <Header label="Apps" id="appearances" />
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[var(--tg-hint)]/10">
+                            {sorted.map((p, i) => (
+                                <tr key={i}>
+                                    <td className="p-3">
+                                        <div className="font-bold text-sm text-[var(--tg-text)]">{p.player_name}</div>
+                                        <div className="text-[10px] font-medium text-[var(--tg-hint)]">{p.division}</div>
+                                    </td>
+                                    <td className="p-3 text-sm text-right text-[var(--tg-text)] font-medium">{p.goals}</td>
+                                    <td className="p-3 text-sm text-right text-[var(--tg-text)]">{p.assists}</td>
+                                    <td className="p-3 text-sm text-right text-[var(--tg-text)]">{p.appearances}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            );
+        };
+
+        const LadderTable = ({ ladder, title }) => (
+            <div className="bg-[var(--tg-bg)] rounded-xl overflow-hidden shadow-sm mb-6">
+                <div className="bg-[var(--tg-secondary-bg)] px-4 py-2 border-b border-[var(--tg-hint)]/10">
+                    <h3 className="text-xs font-bold text-[var(--tg-hint)] uppercase tracking-wider">{title}</h3>
+                </div>
+                <table className="w-full text-left text-sm">
+                    <thead>
+                        <tr className="text-[var(--tg-hint)] text-xs">
+                            <th className="p-3 font-semibold w-10 text-center">#</th>
+                            <th className="p-3 font-semibold">Team</th>
+                            <th className="p-3 font-semibold text-center w-10">P</th>
+                            <th className="p-3 font-semibold text-center w-10">GD</th>
+                            <th className="p-3 font-semibold text-center w-10 text-[var(--tg-text)]">Pts</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--tg-hint)]/10">
+                        {ladder.map((team) => {
+                            const isMyTeam = team.Club.includes('Perth United');
+                            return (
+                                <tr key={team.Club} className={isMyTeam ? 'bg-[var(--tg-button)]/5' : ''}>
+                                    <td className="p-3 text-center font-medium text-[var(--tg-hint)]">{team.Rank}</td>
+                                    <td className={`p-3 font-medium ${isMyTeam ? 'text-[var(--tg-button)]' : 'text-[var(--tg-text)]'}`}>
+                                        {team.Club}
+                                    </td>
+                                    <td className="p-3 text-center text-[var(--tg-hint)]">{team.Played}</td>
+                                    <td className="p-3 text-center text-[var(--tg-hint)]">{team.GD}</td>
+                                    <td className="p-3 text-center font-bold text-[var(--tg-text)]">{team.Points}</td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        );
+
+        // --- Main App ---
+        function App() {
+            const [tab, setTab] = useState('fixtures');
+            const { data, isLoading, error } = useQuery({
+                queryKey: ['allData'],
+                queryFn: async () => {
+                    const res = await fetch(`${API_BASE_URL}/api/stats`);
+                    if (!res.ok) throw new Error('Network error');
+                    return res.json();
+                }
+            });
+
+            useEffect(() => {
+                if (window.Telegram?.WebApp) {
+                    window.Telegram.WebApp.ready();
+                    window.Telegram.WebApp.expand();
+                    
+                    // Sync Theme
+                    const tg = window.Telegram.WebApp;
+                    document.documentElement.style.setProperty('--tg-bg', tg.themeParams.bg_color);
+                    document.documentElement.style.setProperty('--tg-text', tg.themeParams.text_color);
+                    document.documentElement.style.setProperty('--tg-hint', tg.themeParams.hint_color);
+                    document.documentElement.style.setProperty('--tg-button', tg.themeParams.button_color);
+                    document.documentElement.style.setProperty('--tg-button-text', tg.themeParams.button_text_color);
+                    document.documentElement.style.setProperty('--tg-secondary-bg', tg.themeParams.secondary_bg_color);
+                }
+            }, []);
+
+            if (isLoading) return <div className="flex h-screen items-center justify-center text-[var(--tg-hint)] font-medium animate-pulse">Loading Stats...</div>;
+            if (error) return <div className="p-8 text-red-500 text-center font-medium">Unable to load data.<br/><span className="text-xs opacity-70">Check internet connection</span></div>;
+
+            // Data Processing
+            const fixtures = data?.fixtures || [];
+            const upcoming = fixtures.filter(f => {
+                const s = String(f.score || '').toLowerCase();
+                // Matches anything that is NOT a score pattern (e.g. "3 - 1")
+                return !s.match(/\d+\s*-\s*\d+/);
+            });
+            // Results are the opposite of upcoming
+            const results = fixtures.filter(f => !upcoming.includes(f)).reverse(); 
+            
+            return (
+                <div className="pb-20">
+                    {/* Sticky Header */}
+                    <div className="sticky top-0 z-10 bg-[var(--tg-bg)]/95 backdrop-blur-sm shadow-sm border-b border-[var(--tg-hint)]/10">
+                        <div className="flex justify-between px-2">
+                            <TabButton active={tab === 'fixtures'} label="Fixtures" icon={<IconCalendar/>} onClick={() => setTab('fixtures')} />
+                            <TabButton active={tab === 'results'} label="Results" icon={<IconHistory/>} onClick={() => setTab('results')} />
+                            <TabButton active={tab === 'stats'} label="Stats" icon={<IconUsers/>} onClick={() => setTab('stats')} />
+                            <TabButton active={tab === 'ladder'} label="Table" icon={<IconTrophy/>} onClick={() => setTab('ladder')} />
+                        </div>
+                    </div>
+
+                    {/* Content Area */}
+                    <div className="p-4 max-w-md mx-auto">
+                        {tab === 'fixtures' && (
+                            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                {upcoming.length === 0 && <div className="text-center text-[var(--tg-hint)] mt-10">No upcoming games found.</div>}
+                                {upcoming.map(f => <FixtureCard key={f.id} f={f} />)}
+                            </div>
+                        )}
+
+                        {tab === 'results' && (
+                            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                {results.length === 0 && <div className="text-center text-[var(--tg-hint)] mt-10">No past results found.</div>}
+                                {results.map(f => <FixtureCard key={f.id} f={f} isResult />)}
+                            </div>
+                        )}
+
+                        {tab === 'stats' && (
+                            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                <StatsTable players={data?.players || []} />
+                            </div>
+                        )}
+                        
+                        {tab === 'ladder' && (
+                            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                <LadderTable ladder={data?.msl_ladder || []} title="Men's Supa-Liga (A)" />
+                                <LadderTable ladder={data?.mslb_ladder || []} title="Men's Supa-Liga (B)" />
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(
+            <QueryClientProvider client={queryClient}>
+                <App />
+            </QueryClientProvider>
+        );
     </script>
 </body>
 </html>
