@@ -1,7 +1,7 @@
 # Dockerfile
 
 # 1. Use the NOBLE image (Python 3.12) to support asyncio.TaskGroup
-FROM mcr.microsoft.com/playwright/python:v1.55.0-noble
+FROM mcr.microsoft.com/playwright/python:v1.56.0-noble
 
 # 2. Set the working directory
 WORKDIR /app
