@@ -4,20 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <title>Perth United Stats</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Libraries (Using v4 for reliable window.ReactQuery access) -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@tanstack/react-query@4/build/umd/index.production.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Telegram SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- 
+      LIBRARIES (Using jsDelivr for better reliability)
+      We use React Query v4 because it reliably exports 'window.ReactQuery'.
+    -->
+    <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tanstack/react-query@4.29.25/build/umd/index.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.22.9/babel.min.js"></script>
 
     <style>
+        /* Telegram Theme Integration */
         :root {
             --tg-bg: var(--tg-theme-bg-color, #fff);
             --tg-text: var(--tg-theme-text-color, #000);
             --tg-hint: var(--tg-theme-hint-color, #999);
+            --tg-link: var(--tg-theme-link-color, #2481cc);
             --tg-button: var(--tg-theme-button-color, #2481cc);
             --tg-button-text: var(--tg-theme-button-text-color, #fff);
             --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #f4f4f4);
@@ -30,23 +39,28 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        // --- 1. Your Polling Fix (Robust Loading) ---
-        const startApp = () => {
-            if (!window.React || !window.ReactDOM || !window.ReactQuery) {
-                // Keep checking every 50ms until libraries exist
-                return setTimeout(startApp, 50); 
+        // Wait for the browser to confirm ALL scripts are downloaded and ready
+        window.onload = () => {
+            
+            // --- Safety Check ---
+            if (!window.React || !window.ReactQuery) {
+                document.getElementById('root').innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: red;">
+                        <h3>Critical Error</h3>
+                        <p>Libraries failed to load.</p>
+                        <p>Please check your internet connection and refresh.</p>
+                    </div>`;
+                throw new Error("Libraries not found in window scope");
             }
 
             const { useState, useEffect, useMemo } = React;
+            // React Query v4 always uses this global name
             const { QueryClient, QueryClientProvider, useQuery } = window.ReactQuery;
-            const queryClient = new QueryClient();
             
-            // Empty string = Fetch from same domain (Render)
+            const queryClient = new QueryClient();
             const API_BASE_URL = ""; 
 
-            // --- 2. UI Components ---
-
-            // Icons (Inline SVG)
+            // --- Icons ---
             const Icons = {
                 Calendar: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
                 History: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>,
@@ -54,6 +68,7 @@
                 Trophy: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
             };
 
+            // --- Components ---
             const TabButton = ({ active, label, icon, onClick }) => (
                 <button 
                     onClick={onClick}
@@ -102,7 +117,10 @@
                 const sorted = useMemo(() => [...players].sort((a, b) => (b[sort] || 0) - (a[sort] || 0)), [players, sort]);
 
                 const Header = ({ label, id }) => (
-                    <th className={`p-3 text-xs font-bold cursor-pointer text-right ${sort === id ? 'text-[var(--tg-button)]' : 'text-[var(--tg-hint)]'}`} onClick={() => setSort(id)}>
+                    <th 
+                        className={`p-3 text-xs font-bold cursor-pointer text-right ${sort === id ? 'text-[var(--tg-button)]' : 'text-[var(--tg-hint)]'}`} 
+                        onClick={() => setSort(id)}
+                    >
                         {label} {sort === id && '↓'}
                     </th>
                 );
@@ -151,14 +169,19 @@
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {ladder.map((team) => (
-                                <tr key={team.Club} className={team.Club.includes('Perth United') ? 'bg-blue-50' : ''}>
-                                    <td className="p-3 text-center text-[var(--tg-hint)]">{team.Rank}</td>
-                                    <td className="p-3 font-medium truncate max-w-[140px]">{team.Club}</td>
-                                    <td className="p-3 text-center text-[var(--tg-hint)]">{team.Played}</td>
-                                    <td className="p-3 text-center font-bold">{team.Points}</td>
-                                </tr>
-                            ))}
+                            {ladder.map((team) => {
+                                const isMyTeam = team.Club.includes('Perth United');
+                                return (
+                                    <tr key={team.Club} className={isMyTeam ? 'bg-blue-50' : ''}>
+                                        <td className="p-3 text-center text-[var(--tg-hint)]">{team.Rank}</td>
+                                        <td className={`p-3 font-medium truncate max-w-[140px] ${isMyTeam ? 'text-[var(--tg-button)]' : 'text-[var(--tg-text)]'}`}>
+                                            {team.Club}
+                                        </td>
+                                        <td className="p-3 text-center text-[var(--tg-hint)]">{team.Played}</td>
+                                        <td className="p-3 text-center font-bold">{team.Points}</td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -172,7 +195,7 @@
                     queryKey: ['allData'],
                     queryFn: async () => {
                         const res = await fetch(`${API_BASE_URL}/api/stats`);
-                        if (!res.ok) throw new Error('Failed to load');
+                        if (!res.ok) throw new Error('Failed to fetch');
                         return res.json();
                     }
                 });
@@ -181,22 +204,26 @@
                     if (window.Telegram?.WebApp) {
                         const tg = window.Telegram.WebApp;
                         tg.ready(); tg.expand();
-                        document.documentElement.style.setProperty('--tg-bg', tg.themeParams.bg_color);
-                        document.documentElement.style.setProperty('--tg-text', tg.themeParams.text_color);
-                        document.documentElement.style.setProperty('--tg-hint', tg.themeParams.hint_color);
-                        document.documentElement.style.setProperty('--tg-button', tg.themeParams.button_color);
-                        document.documentElement.style.setProperty('--tg-button-text', tg.themeParams.button_text_color);
-                        document.documentElement.style.setProperty('--tg-secondary-bg', tg.themeParams.secondary_bg_color);
+                        
+                        // Theme Sync
+                        const s = document.documentElement.style;
+                        s.setProperty('--tg-bg', tg.themeParams.bg_color);
+                        s.setProperty('--tg-text', tg.themeParams.text_color);
+                        s.setProperty('--tg-hint', tg.themeParams.hint_color);
+                        s.setProperty('--tg-button', tg.themeParams.button_color);
+                        s.setProperty('--tg-button-text', tg.themeParams.button_text_color);
+                        s.setProperty('--tg-secondary-bg', tg.themeParams.secondary_bg_color);
                     }
                 }, []);
 
-                if (isLoading) return <div className="flex h-screen items-center justify-center text-[var(--tg-hint)]">Loading Stats...</div>;
-                if (error) return <div className="p-8 text-red-500 text-center">Error loading data.</div>;
+                if (isLoading) return <div className="flex h-screen items-center justify-center text-[var(--tg-hint)] animate-pulse">Loading Stats...</div>;
+                if (error) return <div className="p-8 text-red-500 text-center">Error: {error.message}</div>;
 
                 const fixtures = data?.fixtures || [];
-                // Logic: If score contains numbers (e.g. "3 - 1"), it's a Result. Otherwise it's Upcoming.
+                // Logic: A game is upcoming if the score does NOT look like "3 - 1"
                 const upcoming = fixtures.filter(f => !String(f.score || '').match(/\d+\s*-\s*\d+/));
-                const results = fixtures.filter(f => !upcoming.includes(f)).reverse();
+                // Logic: A game is a result if it DOES look like "3 - 1"
+                const results = fixtures.filter(f => String(f.score || '').match(/\d+\s*-\s*\d+/)).reverse();
 
                 return (
                     <div>
@@ -242,9 +269,6 @@
             const root = ReactDOM.createRoot(document.getElementById('root'));
             root.render(<QueryClientProvider client={queryClient}><App /></QueryClientProvider>);
         };
-
-        // Execute Polling Logic
-        startApp();
     </script>
 </body>
 </html>
