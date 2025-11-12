@@ -5,4 +5,4 @@ pandas
 playwright
 lxml
 uvicorn
-asgi-tools
+a2wsgi

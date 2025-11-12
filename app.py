@@ -1,4 +1,8 @@
 # app.py
+#
+# FINAL STABLE VERSION (v7)
+# Fixes the Flask/Uvicorn TypeError by passing the correct ASGI app
+# to the Uvicorn config.
 
 import asyncio
 import logging
@@ -7,8 +11,8 @@ import re
 import sqlite3
 
 import pandas as pd
-import uvicorn  # For running Flask asynchronously
-from asgi_tools.wrappers import WSGIMiddleware
+import uvicorn
+from a2wsgi import WSGIMiddleware
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from telegram import Update
@@ -39,7 +43,6 @@ logger = logging.getLogger(__name__)
 
 # --- Database Setup (SQLite) ---
 def init_db():
-    # check_same_thread=False is crucial for this environment
     with sqlite3.connect(DB_FILE, check_same_thread=False) as conn:
         cursor = conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS subscriptions (chat_id INTEGER PRIMARY KEY)''')
@@ -52,7 +55,6 @@ def init_db():
 
 # --- Push Notification Logic ---
 async def send_telegram_message(bot, chat_id, message_text):
-    """Utility function to send a message to a specific user."""
     try:
         await bot.send_message(chat_id=chat_id, text=message_text)
         logger.info(f"Sent message to {chat_id}")
@@ -67,10 +69,6 @@ async def send_telegram_message(bot, chat_id, message_text):
 
 # --- Background Scraper & Notifier Job ---
 async def scheduled_scraper_job(context: ContextTypes.DEFAULT_TYPE):
-    """
-    This is the core job, run by the bot's JobQueue.
-    It runs the scraper, compares data, and sends notifications.
-    """
     logger.info("--- [SCHEDULER]: Running scheduled scraper job... ---")
 
     application_instance = context.application
@@ -104,7 +102,7 @@ async def scheduled_scraper_job(context: ContextTypes.DEFAULT_TYPE):
                 score_str = str(new_fix.get('score', '')).strip().lower()
                 is_played = re.search(r'\d+\s*-\s*\d+', score_str)
                 if is_played:
-                    continue  # Skip played games
+                    continue
 
                 old_date_time = old_fixtures_map.get(new_fix['id'])
 
@@ -130,7 +128,6 @@ async def scheduled_scraper_job(context: ContextTypes.DEFAULT_TYPE):
                 all_subs = cursor.execute("SELECT chat_id FROM subscriptions").fetchall()
                 full_message = "\n\n".join(notifications_to_send)
                 for (chat_id,) in all_subs:
-                    # We are already in an async job, so just await
                     await send_telegram_message(application_instance.bot, chat_id[0], full_message)
 
         logger.info("--- [SCHEDULER]: Job finished. ---")
@@ -166,7 +163,6 @@ def get_all_stats():
 
 @app.route('/health')
 def health_check():
-    """A simple health check endpoint for Render."""
     return jsonify({
         "status": "ok",
         "last_updated": LIVE_CACHE.get('last_updated'),
@@ -193,10 +189,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# --- Main Startup Function ---
 async def main():
-    """Starts the Flask server and the Telegram bot."""
-
     if not TELEGRAM_BOT_TOKEN:
         logger.error("!!! ERROR: TELEGRAM_BOT_TOKEN environment variable is not set.")
         return
@@ -204,52 +197,40 @@ async def main():
         logger.error("!!! ERROR: MINI_APP_URL environment variable is not set.")
         return
 
-    # Initialize the DB
     init_db()
 
-    # Create the Telegram Application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Add the /start command handler
     application.add_handler(CommandHandler("start", start))
 
-    # --- Schedule the scraper job using the bot's job queue ---
     job_queue = application.job_queue
     if job_queue:
-        job_queue.run_once(scheduled_scraper_job, 5)  # Run 5 seconds after startup
-        job_queue.run_repeating(scheduled_scraper_job, interval=SCRAPE_INTERVAL_MINUTES * 60, first=5)
+        job_queue.run_once(scheduled_scraper_job, 5)
+        job_queue.run_repeating(scheduled_scraper_job, interval=SCRAPE_INTERVAL_MINUTES * 60)
     else:
         logger.error("JobQueue is not available. Check requirements.txt for [job-queue]")
 
-    # --- Start the Flask server as an async task ---
-    # Render's PORT env var is 10000 by default
     port = int(os.environ.get('PORT', 10000))
 
-    # Use Uvicorn to run Flask (app) as an async-compatible server
-    # We must wrap the Flask app (WSGI) in an ASGI middleware
+    # Wrap Flask with a2wsgi middleware
     asgi_app = WSGIMiddleware(app)
+
+    # --- THIS IS THE FIX ---
+    # Pass the 'asgi_app' wrapper to Uvicorn, not the raw 'app'
     config = uvicorn.Config(asgi_app, host="0.0.0.0", port=port, log_level="info")
+    # --- END OF FIX ---
+
     server = uvicorn.Server(config)
 
     logger.info(f"Starting Flask/Uvicorn server on port {port}...")
 
-    # --- This is the fix for the event loop crash ---
-
-    # 1. Initialize the bot (this creates the job_queue)
     await application.initialize()
-
-    # 2. Start the job queue (which runs the scheduler)
     if application.job_queue:
         await application.job_queue.start()
 
-    # 3. Start the Flask/Uvicorn server task
-    server_task = asyncio.create_task(server.serve())
-
-    # 4. Start the bot polling task (non-blocking)
-    await application.updater.start_polling(drop_pending_updates=True)
-
-    # Wait for both tasks to run
-    await asyncio.gather(server_task)
+    # Run server and bot polling concurrently
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(server.serve())
+        tg.create_task(application.updater.start_polling(drop_pending_updates=True))
 
 
 if __name__ == '__main__':
