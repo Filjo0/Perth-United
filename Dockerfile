@@ -1,7 +1,7 @@
 # Dockerfile
 
-# 1. Use the EXACT version Playwright recommended in the error log
-FROM mcr.microsoft.com/playwright/python:v1.55.0-jammy
+# 1. Use the NOBLE image (Python 3.12) to support asyncio.TaskGroup
+FROM mcr.microsoft.com/playwright/python:v1.55.0-noble
 
 # 2. Set the working directory
 WORKDIR /app
@@ -13,6 +13,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 4. Copy the rest of your application code
 COPY . .
 
-# 5. Tell Render what command to run to start your server
-# Render automatically provides the $PORT environment variable
+# 5. Run the app
 CMD ["python", "app.py"]
